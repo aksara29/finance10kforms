@@ -1,0 +1,2124 @@
+---
+title: 'Text Analytics: 10-K Forms (SEC)'
+author: "Aksara Iam"
+date: "2/7/2021"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+    bibliography: text_individual.bib
+    link-citations: yes
+  editor_options:
+    markdown:
+      wrap: sentence
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=TRUE)
+#install.packages("MASS")
+#install.packages("leaps")
+#install.packages("cld3")
+#install.packages("textcat")
+#install.packages("udpipe")
+#install.packages("widyr")
+#install.packages("igraph")
+#install.packages("ggraph")
+#install.packages("corrr")
+#install.packages("jtools")
+#install.packages("flextable")
+#install.packages("mctest")
+#install.packages("edgar")
+#install.packages("edgarWebR")
+#install.packages("readtext")
+#install.packages("tidyquant")
+#install.packages("BatchGetSymbols")
+#install.packages("SentimentAnalysis")
+#install.packages("sentimentr")
+#install.packages("plm")
+#install.packages("geometry")
+#install.packages("Rtsne")
+#install.packages("rsvd")
+#install.packages("lmtest")
+#install.packages("NCmisc")
+library(splines)
+library(KernSmooth)
+library(lda)
+library(slam)
+library(Rcpp)
+library(RcppArmadillo)
+library(matrixStats)
+library(NCmisc)
+library(lmtest)
+library(Rtsne)
+library(rsvd)
+library(geometry)
+require(stm)
+library(plm)
+library(sentimentr)
+library(SentimentAnalysis)
+library(BatchGetSymbols)
+library(tidyquant)
+library(timeDate)
+library(readtext)
+library(edgarWebR)
+library(edgar)
+library(mctest)
+library(caret)
+library(corrr)
+library(rvest)
+library(tidyverse)
+library(stringr)
+library(broom)
+library(tidyr)
+library(tidytext)
+library(lubridate)
+library(cld3)
+library(qdap)
+library(textshape)
+library(tm)
+library(dplyr)
+library(magrittr)
+library(textcat)
+library(udpipe)
+library(ggmap)
+library(cluster)   
+library(topicmodels)
+library(slam)
+library(SnowballC)
+library(wordcloud)
+library(zoo)
+library(stringi)
+library(gridExtra)
+library(scales)
+library(widyr)
+library(igraph)
+library(hunspell)
+library(ggraph)
+library(Hmisc)
+library(knitr)
+summarize <- dplyr::summarize
+```
+
+# Introduction
+
+Public companies, domestic and foreign, are required to provide filings to the U.S. Securities and Exchange Commission (SEC) in which they contain company financial and operational information in different forms and periods such as quarterly reports (10-Q), annual reports (10-K). In addition, the filing process is managed through EDGAR, which is the Electronic Data Gathering, Analysis, and Retrieval system. This provides advantages to investors, companies, and the U.S. economy by enhancing transparency, fairness, and efficiency of securities markets.
+
+Furthermore, the annual report, 10-K form, yields companies a great opportunity to illustrate their business information, risk analysis, financial data, and management’s discussion and analysis (MD&A), which is the only part that companies express business performance by not conforming with the Generally Accepted Accounting Principles (GAAP) . This possibly results in a positive bias in which companies specifically use positive words in the discussion part to avoid negative effect on stock price. In fact, [@Taylor] found that the sentiment diminishes after the non-GAAP texts are removed. Consequently, this leads to the questions whether the analysis from MD&A part could generally provide meaningful insights to investors and the effect of the text sentiment per se.
+
+Therefore, the purpose of this report is to extract insights from the MD&A part of S&P 500 companies in Information and Technology sector (GICS)  and analyze them to predict stock price value by using content-based analysis approach i.e., text mining. In addition, the approach was firstly developed by [@Loughran], who conducted textual analysis of 10-Ks and the effect on stock returns, particularly in the financial context, and eventually developed a dictionary used in the textual analysis. Furthermore, [@Chouliaras] concluded that 10-K negative polarity affected stock price after filing on a monthly basis. Particularly, [@Ahern] evidenced that firms who manipulate media coverage gain an advantage of increasing better stock prices, which signifies textual sentiment impact on the stock price.
+
+The rest of this report is organized as follows. Section 2 provides an overall design of textual analysis – Natural Language Processing (NLP) pipelines. Next, in section 3 presents how corpus is constructed and general insights using bag-of-words and tidy text approaches [@Silge]. In addition, section 4 will provide how text features such as polarity formality; are extracted and the effect on the stock price. Lastly, section 5 presents the analysis based on topic modelling – how topics are retrieved and the analysis of marginal effect of the topics on the stock price.
+
+---
+
+# Textual Analysis Design
+
+## Analysis Approach
+
+The data is collected from https://www.sec.gov/edgar.shtml in which 10-K forms are retrieved, specifically for the MD&A section for 30 companies, from 2010 to 2020 depending on availability on EDGAR. Further explanation on data sampling and company selection criteria will be provided in section 3. After that, Natural Language processing pipelines are created beginning with text cleaning and metadata retrieval. Next, lemmatization and pos-tagging are applied to the text data to reduce word duplication and enhance word understanding or semantic coherence. The last part in the section 3 will provide bag of words analysis using TF-IDF approach^[https://www.tidytextmining.com/tfidf.html] for context understanding purpose.
+
+Moreover, sentiment analysis in section 4 will present how to retrieve important features from the text data, which are polarity, formality, reading level, and stock price. The analysis in this part will discuss proper dictionary to use in the financial context; descriptive analysis of the stock price relationship with other features; and the effect of these features on the stock price using regression.
+
+Lastly, in section 5, the text data is processed and cleaned for a corpus construction used in topic modelling following the similar approach to [@Schmiedel], who demonstrated the advantage of using structural topic modelling (STM). This section will provide the discussion of the optimal number of topics and topic evaluation including the relationship of features to topics using regression analysis. The approach is summarized in the Figure 1: Summary of analysis approach.
+
+![Figure 1 Summary of analysis approach](Figure 1 Summary of analysis approach.png)
+
+---
+
+# Corpus Construction
+
+In this section, it presents how the data is downloaded from EDGAR, specifically for the MD&A part in 10-K forms, and parsed into a data frame. It also illustrates the pipelines starting with data cleaning, lemmatization and pos-tagging. After that, the analysis is split into 2 routes, unigram and bi-grams where it evidences how tokenization process is implemented including the insights based on TF-IDF approach. The approach summary can be found in Figure 2: Summary of corpus construction approach below.
+
+![Figure 2 Summary of corpus construction approach](Figure 2 Summary of corpus construction approach.png)
+
+## Data import
+
+The purpose of this project is to quantitatively predict the impact of sentiment and topics on the change in stock price. Therefore, the data for such analysis is collected from https://www.sec.gov/edgar.shtml where 10-K forms of 30 companies from S&P 500 companies, specifically in the Information Technology sector (GICS), are randomly selected. In addition, the additional criterion of company selection is based on a number of companies in each sub industry, in which top 5 sub industries with the highest number of companies are selected, which are Semiconductors (Semi Con); Data Processing & Outsourced Services (DP); Application Software (App); Technology, Hardware (Tech Hardware), Storage & Peripherals; and IT Consulting & Other Services (IT Consult). The summary is presented in Figure 3: Summary of the number of companies in IT sector below.
+
+![Figure 3 Summary of the number of companies in IT sector](Figure 3 Summary of the number of companies in IT sector.jpg)
+For each sub industry, companies are randomly selected, and the data, specifically in the MD&A part is collected from 2010 to 2020, where it is available. The list of companies, sub industry, and sample size are summarized in the Figure 4: Sample size of each company across sub industries below.
+
+![Figure 4 Sample size of each company across sub industries](Figure 4 Sample size of each company across sub industries.jpg)
+
+```{r setenv, results = 'hide'}
+# set up a user for EDGAR to prevent errors of using automated tools
+Sys.setenv("User-Agent"="EDGARWEBR_USER_AGENT")
+```
+
+- xxxxx
+
+```{r ciklist}
+# create lists of companies across sub industries using CIK numbers
+app_software = c("796343", "883241", "896878", "1108524", "1341439", "1013462")
+dp_outsource = c("1175454","723531","1101215","1123360","1141391","1365135","1403161","1136893")
+it_con = c("749251","1058290","1467373","1336920")
+semi_con = c("2488","50863","743316","804328","827054","1045810","4127","1730168")
+tech_hw = c("108772","320193","106040","1137789")
+
+cik_list = c(app_software, dp_outsource, it_con, semi_con, tech_hw)
+```
+
+- xxxxx
+
+```{r index, cache=TRUE,results='hide',eval=FALSE}
+# retrieve indexes and metadata across companies in the cik list
+edgar::getMasterIndex(2010:2020)
+indexes = data.frame()
+
+index_files = list.files("Master Indexes/", pattern="Rda")
+
+for(i in index_files){
+  load(paste0("Master Indexes/",i))
+  this_index <- year.master 
+  indexes <- bind_rows(indexes,this_index)
+  print(i)
+}
+```
+
+```{r index2, results='hide', eval=FALSE}
+# to cross check available data
+indexes_2 = indexes %>% filter(cik %in% cik_list, form.type == "10-K")
+```
+
+```{r sleepfn, cache=TRUE}
+# create system sleep function
+testit <- function(x){
+    p1 <- proc.time()
+    Sys.sleep(x)
+    proc.time() - p1 
+}
+```
+
+- Financial reports in 10-K forms are retrieved for all companies in the list from 2010 to 2020.
+
+```{r import, cache=TRUE,results='hide',eval=FALSE}
+for(i in cik_list){
+  print(i)
+
+  for(y in c(2010:2020)){
+  print(y)
+  getFilings(cik.no = i, filing.year = y,form.type = "10-K")
+  testit(10)
+  }
+}
+```
+
+- Let's adjust the function getMgmtDisc() from this [source](https://github.com/cran/edgar/blob/master/R/getMgmtDisc.R).
+
+```{r getmgmt, cache=TRUE, results='hide'}
+# create a function to retrieve only management discussion part 
+getMgmtDisc_2 <- function(cik.no, filing.year) {
+    
+    f.type <- c("10-K", "10-K405","10KSB", "10KSB40")
+    # 10-K, 10-K405, 10-KSB, 10-KT, 10KSB, 10KSB40, and 10KT405 filings in the EDGAR database
+
+    # check the year validity
+    if (!is.numeric(filing.year)) {
+        cat("Please check the input year.")
+        return()
+    }
+    
+    output <- getFilings(cik.no = cik.no, form.type = f.type , filing.year, 
+						 quarter = c(1, 2, 3, 4), downl.permit = "y")
+    
+    if (is.null(output)){
+      cat("No annual statements found for given CIK(s) and year(s).")
+      return()
+    }
+    
+    cat("Extracting 'Item 7' section...\n")
+    
+    progress.bar <- txtProgressBar(min = 0, max = nrow(output), style = 3)
+    
+    # function for text cleaning
+    CleanFiling2 <- function(text) {
+      
+      text <- gsub("[[:digit:]]+", "", text)  ## remove Alphnumerics
+      
+      text <- gsub("\\s{1,}", " ", text)
+      
+      text <- gsub('\"',"", text)
+      
+      #text <- RemoveStopWordsFilings(text)
+      
+      return(text)
+    }
+
+    new.dir <- paste0("MD&A section text")
+    dir.create(new.dir)
+    
+    output$extract.status <- 0
+    
+    output$company.name <- toupper(as.character(output$company.name))
+    output$company.name <- gsub("\\s{2,}", " ",output$company.name)
+    
+    for (i in 1:nrow(output)) {
+        f.type <- gsub("/", "", output$form.type[i])
+        cname <- gsub("\\s{2,}", " ",output$company.name[i])
+        year <- output$filing.year[i]
+        cik <- output$cik[i]
+        date.filed <- output$date.filed[i]
+        accession.number <- output$accession.number[i]
+        
+        dest.filename <- paste0("Edgar filings_full text/Form ", f.type, 
+                                "/", cik, "/", cik, "_", f.type, "_", 
+                                date.filed, "_", accession.number, ".txt")
+        # read filing
+        filing.text <- readLines(dest.filename)
+        
+        # extract data from first <DOCUMENT> to </DOCUMENT>
+        tryCatch({
+          filing.text <- filing.text[(grep("<DOCUMENT>", filing.text, ignore.case = TRUE)[1]):(grep("</DOCUMENT>", 
+                                                                                                    filing.text, ignore.case = TRUE)[1])]
+        }, error = function(e) {
+          filing.text <- filing.text ## In case opening and closing DOCUMENT TAG not found, cosnider full web page
+        })
+        
+        # See if 10-K is in XLBR or old text format
+        if (any(grepl(pattern = "<xml>|<type>xml|<html>|10k.htm", filing.text, ignore.case = T))) {
+            
+            doc <- XML::htmlParse(filing.text, asText = TRUE, useInternalNodes = TRUE, addFinalizer = FALSE)
+            
+            f.text <- XML::xpathSApply(doc, "//text()[not(ancestor::script)][not(ancestor::style)][not(ancestor::noscript)][not(ancestor::form)]", 
+                XML::xmlValue)
+            
+            f.text <- iconv(f.text, "latin1", "ASCII", sub = " ")
+			
+			      ## free up htmlParse document to avoid memory leakage, this calls C function
+            #.Call('RS_XML_forceFreeDoc', doc, package= 'XML')
+            
+        } else {
+            f.text <- filing.text
+        }
+        
+        # preprocessing the filing text
+        f.text <- gsub("\\n|\\t|$", " ", f.text)
+        f.text <- gsub("^\\s{1,}", "", f.text)
+        f.text <- gsub(" s ", " ", f.text)
+        
+        # check for empty Lines and delete it
+        empty.lnumbers <- grep("^\\s*$", f.text)
+        
+        if (length(empty.lnumbers) > 0) {
+            f.text <- f.text[-empty.lnumbers]  ## remove all lines only with space
+        }
+        
+        
+        # get MD&A sections
+        startline <- grep("^Item\\s{0,}7[^A]", f.text, ignore.case = TRUE)
+        endline <- grep("^Item\\s{0,}7A", f.text, ignore.case = TRUE)
+        
+        # if dont have Item 7A, then take upto Item 8
+        if (length(endline) == 0) {
+            endline <- grep("^Item\\s{0,}8", f.text, ignore.case = TRUE)
+        }
+        
+        md.dicusssion <- NA
+        
+        if (length(startline) != 0 && length(endline) != 0) {
+            
+            startline <- startline[length(startline)]
+            endline <- endline[length(endline)] - 1
+            
+            md.dicusssion <- paste(f.text[startline:endline], collapse = " ")
+            md.dicusssion <- gsub("\\s{2,}", " ", md.dicusssion)
+            #words.count <- str_count(md.dicusssion, pattern = "\\S+")
+            
+            #md.dicusssion <- gsub(" co\\.| inc\\.| ltd\\.| llc\\.| comp\\.", " ", md.dicusssion, ignore.case = T)
+            
+            #md.dicusssion2 <- unlist(strsplit(md.dicusssion, "\\. "))
+            #md.dicusssion2 <- paste0(md.dicusssion2, ".")
+            #md.dicusssion <- CleanFiling2(md.dicusssion)
+            header <- paste0("CIK: ", cik, "\n", "Company Name: ", cname, "\n", 
+                             "Form Type : ", f.type, "\n", "Filing Date: ", date.filed, "\n",
+                             "Accession Number: ", accession.number)  
+            md.dicusssion <- paste0(header, "\n\n\n", md.dicusssion)
+            
+            
+        }
+        
+        if( (!is.na(md.dicusssion)) ){
+          filename2 <- paste0(new.dir, '/',cik, "_", f.type, "_", date.filed, 
+                              "_", accession.number, ".txt")
+          
+          writeLines(md.dicusssion, filename2)
+          output$extract.status[i] <- 1
+        }
+        
+        # update progress bar
+        setTxtProgressBar(progress.bar, i)
+    }
+    
+    ## convert dates into R dates
+    output$date.filed <- as.Date(as.character(output$date.filed), "%Y-%m-%d")
+
+    # close progress bar
+    close(progress.bar)
+    
+    output$quarter <- NULL
+    output$filing.year <- NULL
+    names(output)[names(output) == 'status'] <- 'downld.status'
+    
+    cat("MD&A section texts are stored in 'MD&A section text' directory.")
+    
+    return(output)
+}
+```
+
+```{r mgsection,cache=TRUE,results='hide',eval=FALSE}
+# download management discussion data
+df = data.frame()
+
+for(i in as.numeric(cik_list)){
+  print(i)
+
+  for(y in 2010:2020){
+  print(y)
+  data = getMgmtDisc_2(cik.no = i, filing.year = y)
+  df = rbind(df, data)
+  testit(10)
+  }
+}
+```
+
+```{r mgtdf, cache=TRUE, results='hide'}
+# management discussion data frame
+text_df = data.frame()
+
+txt_files = list.files("MD&A section text/", pattern="txt")
+
+for(i in 1:length(txt_files)){
+  test = readLines(paste0("MD&A section text/",txt_files[i]))
+  
+  cik = test[1]
+  comp_name = test[2]
+  form_type = test[3]
+  filing_date = test[4]
+  access_no = test[5]
+  text = test[8]
+  
+  rows <- data.frame(cik,comp_name,form_type,filing_date,access_no,text)
+  text_df <- bind_rows(text_df,rows)
+  
+  print(i)
+}
+```
+
+## Data cleaning
+
+- The output from the above is cleansed by using the following tasks;
+  - Lowering capital letters
+  - Removing non UTF-8 characters, punctuation marks, emojis, numbers, and line breaks
+
+```{r numextractfn,cache=TRUE}
+# create a function extracting only numbers
+numextract <- function(string){ 
+  str_extract(string, "\\-*\\d+\\.*\\d*")
+} 
+```
+
+```{r cleansefn,cache=TRUE}
+# create a function for text cleaning
+cleanse_text = function(c) {
+  c = tolower(c)
+  c = iconv(c)
+  c = gsub("[[:punct:][:blank:]]+", " ", c)
+  c = stringr::str_replace_all(c, "\r", "")
+  c = trimws(c)
+  
+  # remove mentions, urls, emojis, numbers, punctuations, etc.
+  c <- gsub("@\\w+", "", c)
+  c <- gsub("https?://.+", "", c)
+  c <- gsub("\\d+\\w*\\d*", "", c)
+  c <- gsub("#\\w+", "", c)
+  c <- gsub("[^\x01-\x7F]", "", c)
+  
+  # remove spaces and newlines
+  c <- gsub("\n", " ", c)
+  c <- gsub("^\\s+", "", c)
+  c <- gsub("\\s+$", "", c)
+  c <- gsub("[ |\t]+", " ", c)
+  
+  return(c)
+}
+```
+
+```{r cleantexts,cache=TRUE}
+text_df$cik = as.numeric(str_extract(text_df$cik,pattern="[0-9]+"))
+text_df$comp_name = sub(".*:", "", text_df$comp_name)
+text_df$comp_name = trimws(gsub('"', "", text_df$comp_name))
+text_df$form_type = sub(".*:", "", text_df$form_type)
+text_df$filing_date = as.Date(sub(".*:", "", text_df$filing_date))
+text_df$access_no = numextract(text_df$access_no)
+text_df$text = cleanse_text(text_df$text)
+```
+
+- Text data containing tickers is downloaded from https://www.sec.gov/include/ticker.txt.
+
+```{r ticker,cache=TRUE}
+# read the text data
+ticker = read.csv("ticker.txt",sep = " ", header = FALSE)
+ticker$code = as.numeric(numextract(ticker$V1))
+ticker$comp = sub("\\s+\\S+$", '', ticker$V1)
+ticker = ticker[-1]
+```
+
+```{r textdf2,cache=TRUE,results='hide'}
+# join the data with the previous data frame
+text_df2 = text_df %>% inner_join(ticker, by = c("cik" = "code"))
+
+# feature engineering: create new columns: pre-filing and post-filing dates
+text_df2$date_before <- text_df2$filing_date - 7
+text_df2$date_after <- text_df2$filing_date + 5
+text_df2$date_after_wd <- with(text_df2,  date_after - setNames(rep(0:2, c(5, 1, 1)), 1:7)[format(date_after, "%u")]) # force the post-filing date to be only weekdays
+
+# after checking the data, the company code with CIK 1730168 is duplicate (avgo vs avgop)
+# hence, it is removed
+text_df2 = text_df2 %>% filter(!comp == "avgop")
+```
+
+```{r, eval=FALSE}
+# save the file
+saveRDS(text_df2, file = "text_df2.rds")
+```
+
+## Lemmatization
+
+-   Let's load the model using udpipe library.
+
+```{r langmodel, eval=FALSE}
+langmodel_download <- udpipe::udpipe_download_model("english")
+langmodel <- udpipe::udpipe_load_model(langmodel_download$file_model)
+```
+
+-   Let's do annotation.
+
+```{r postag, eval=FALSE}
+postagged <- udpipe_annotate(langmodel,
+                             text_df2$text,
+                             parallel.cores = 10, 
+                             trace = 100)
+```
+
+-   We can create a data frame and explore it
+
+```{r postagdf, eval=FALSE}
+# create a data frame of pos-tagged texts
+postagged <- as.data.frame(postagged)
+head(postagged)
+
+# save the working file as .rds
+saveRDS(postagged,file = "postagged.rds")
+```
+
+-	Let’s filter and detokenize the postagged terms.
+
+```{r lem}
+# read data
+postagged = readRDS("postagged.rds")
+
+# filter only nouns, adj, and adv
+lematized <- postagged %>% filter(upos %in% c("NOUN",
+                                              "ADJ",
+                                              "ADV")) %>% select(doc_id,lemma) %>% group_by(doc_id) %>% summarise(documents_pos_tagged = paste(lemma,collapse = " "))
+
+# create unique id
+text_df2 <- text_df2 %>% mutate(doc_id = paste0("doc",row_number()))
+
+# combine tables
+text_df3 <- text_df2 %>% left_join(lematized)
+
+# save the working file as .rds
+saveRDS(text_df3,file = "text_df3.rds")
+
+# check NA values across columns
+which(colSums(is.na(text_df3)) > 0)
+```
+
+## Unigram
+
+### Tokenization
+
+-   Let’s do word tokenization using unigram and tidy text approach
+-   More information here: https://www.tidytextmining.com/tidytext.html
+
+```{r token, eval=FALSE}
+# word tokenization
+token_df_all <- text_df3 %>% unnest_tokens(word,documents_pos_tagged)
+
+# check the language and remove non-English words
+token_df_all$lan <- cld3::detect_language(token_df_all$word)
+token_df_all <- token_df_all %>% filter(lan=="en") 
+
+# check the language using different approach: hunspell
+spell_check = hunspell_check(token_df_all$word)
+token_df_all = token_df_all[spell_check,]
+```
+
+-   We next back up the file.
+
+```{r tokendfall, eval=FALSE}
+token_df_all = token_df_all %>% select(-text)
+saveRDS(token_df_all,file = "token_df_all.rds")
+```
+
+-	Let’s inspect text length.
+
+```{r tokenplot}
+# read data
+token_df_all = readRDS("token_df_all.rds")
+
+# calculate the token length 
+token_df_all$token_length <- nchar(token_df_all$word)
+
+# let's have a look on the distribution 
+token_df_all %>% group_by(token_length) %>% summarise(total =n()) %>% ggplot(aes(x=token_length, y=total)) + geom_col() + labs(x="Token length", y="Frequency", subtitle="Distribution of Token Length")
+
+# let's have a look at the distribution of tokens again 
+token_df_all %>% group_by(token_length) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(token_length))
+```
+
+- We can see that the word length is slightly right skewed where the median is approximately 6-8 characters.
+  –	We will remove outliers using IQR approach following [@Hubert].
+
+```{r}
+outliers1 <- boxplot(token_df_all$token_length, ylab = "Token length")$out
+```
+
+```{r}
+# drop the rows containing outliers
+token_df_all <- token_df_all[!token_df_all$token_length %in% outliers1,]
+```
+
+```{r tokenwords, results='hide'}
+# inspect top frequent words
+token_df_all %>% count(word, sort=T)
+
+# remove null values in words
+token_df_all = token_df_all[!is.na(token_df_all$word),]
+```
+
+-	Let’s remove stop words using a package stopwords [@Benoit].
+
+```{r stopwords, warning=FALSE, message=FALSE, results='hide'}
+# load stop words
+data("stop_words")
+token_df2 = token_df_all %>% anti_join(stop_words, by = "word")
+
+token_df2 %>% count(word, sort=T)
+```
+
+-   Let’s add custom stop words, which are the top 50 words from the inspection above.
+
+```{r customstopwords}
+# generate new stop words
+mystopwords <- tibble(word =c("fiscal", "other", "related", "business", "rate", "product", "note", "payment", "table", "contract", "foreign", "currency", "such", "charge", "time", "purchase", "end","research","support", "policy", "available","party", "lease", "requirement", "recognition", "most","significant", "proceed","solutions","excess","issuance","connection","government","day","act","strategy","state","difference","march","country","experience","consulting","action","page","NA", "revenue", "income","tax","cash","cost","net","financial","net","asset","expense","result","total","share","service","company","increase","management","sale"))
+
+# combine data sets
+token_df2 = token_df2 %>% anti_join(mystopwords, by = "word")
+
+# explore top words across corpus
+token_df2 %>% group_by(word) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(total)) %>% 
+  top_n(10) 
+```
+
+-	As a result, top frequent words are more diverse and more adjective and adverb words are observed.
+
+```{r, eval=FALSE}
+# save file
+saveRDS(token_df2,file = "token_df2.rds")
+```
+
+### TF-IDF
+
+#### Document level
+
+-   To gain an insight of how important of words is, we use TF-IDF metric to measure word importance in our documents (corpus).
+  –	Let’s calculate TF-IDF using tidy data principles. [https://www.tidytextmining.com/tfidf.html]
+
+```{r,cache=TRUE, results='hide'}
+listing_words = token_df2 %>% count(doc_id, word, sort=T)
+
+total_words <- listing_words %>% 
+  group_by(doc_id) %>% 
+  summarize(total = sum(n))
+
+listing_words <- listing_words %>% 
+  left_join(total_words)
+```
+
+```{r bindtfidf0,cache=TRUE}
+listing_tf_idf <- listing_words %>% bind_tf_idf(word,doc_id,n) %>% select(-total) 
+```
+
+- Next, we will inspect the data with TF-IDF score.
+- We can see that there is high frequency of words where tf-idf is less than 0.3 across the text in MD&A part.
+
+```{r inspecttfidf}
+# plot a histogram
+hist(listing_tf_idf$tf_idf,breaks = 80,main="TF-IDF plot", xlim = c(0,1))
+```
+
+-   Let's zoom in the data where TF-IDF \< 0.2
+
+```{r}
+listing_tf_idf <- listing_tf_idf %>% 
+  filter(tf_idf<=0.2)
+
+# plot a histogram
+hist(listing_tf_idf$tf_idf,breaks = 80,main="TF-IDF plot", xlim = c(0,0.2))
+```
+
+-   We can see that common words are found the most where tf-idf is equal to 0.01-0.02.
+
+```{r}
+listing_tf_idf_2 <- listing_tf_idf %>% 
+  filter(tf_idf<=0.2)
+
+# statistical summary
+summary(listing_tf_idf_2$tf_idf)
+```
+
+- The summary above presents that the data is right skewed and hence we need to remove the outliers in the new step.
+-	However, let’s check the data based on TF-IDF scores.
+
+```{r}
+# let's explore the top 10 words with the highest tf-idf
+listing_tf_idf_2 %>% 
+  group_by(word) %>% 
+  arrange(desc(tf_idf)) %>% 
+  top_n(10)
+```
+
+- From the top highest tf-idf words, they are mostly nouns, which is relatively difficult to understand the context compared with adjectives and adverbs.
+
+```{r}
+# let's explore the top 10 words with the lowest tf-idf
+listing_tf_idf_2 %>% 
+  group_by(word) %>% 
+  arrange(tf_idf) %>% 
+  top_n(10) 
+```
+
+- Rare words i.e., low frequent words, don’t provide much insight.
+-	Let’s remove outliers.
+
+
+```{r}
+outliers1.1 <- boxplot(listing_tf_idf_2$tf_idf, ylab = "TF-IDF")$out
+summary(listing_tf_idf_2$tf_idf)
+
+# drop the rows containing outliers
+listing_tf_idf_3 <- listing_tf_idf_2 %>% filter(tf_idf <= 0.1 & tf_idf >= 0.0002)
+
+
+listing_tf_idf_3 %>% 
+    group_by(word) %>% 
+    arrange(desc(tf_idf)) %>% 
+    top_n(10)
+```
+
+#### Industry level
+
+- In this part, we will use tokens that we removed from the previous part as they are rare and common words based on TF-IDF scores.
+
+```{r,cache=TRUE}
+token_df3 = token_df2 %>% semi_join(listing_tf_idf_3, by = c("doc_id","word"))
+
+# save file
+saveRDS(token_df3,file = "token_df3.rds")
+```
+
+- Let's explore word frequency by industry.
+
+```{r}
+token_df3 = token_df3 %>%
+  mutate(industry=case_when(
+    cik %in% as.numeric(dp_outsource) ~ "Data Processing & Outsourced Services",
+    cik %in% as.numeric(app_software) ~ "Application Software",
+    cik %in% as.numeric(it_con) ~ "IT Consulting & Other Services",
+    cik %in% as.numeric(semi_con) ~ "Semiconductors",
+    cik %in% as.numeric(tech_hw) ~ "Technology Hardware, Storage & Peripherals"
+  )) %>%
+  mutate(industry=industry %>% as.factor())
+```
+
+- xxx
+
+```{r, warning = FALSE, message = FALSE,cache=TRUE, results='hide'}
+# word counts
+industry_words <- token_df3 %>%
+count(industry, word, sort = TRUE)
+
+# total word counts
+total_industry_words <- industry_words %>%
+group_by(industry) %>%
+summarize(total = sum(n))
+
+# left join
+industry_words <- industry_words %>%
+left_join(total_industry_words)
+```
+
+```{r, warning = FALSE, message = FALSE}
+# visualization of the frequency
+industry_words %>%
+  mutate(tf = n/total) %>%
+  ggplot(aes(x=tf,fill=industry)) +
+  geom_histogram(show.legend = FALSE)+
+  facet_wrap(~industry,ncol=3,scales = "free_y")
+```
+
+- From the figure below, we can see that words with low frequency are the most common across sub industries.
+
+-   Let's apply Zipf's law
+
+```{r, warning = FALSE, message = FALSE}
+industry_words %>%
+  group_by(industry) %>%
+  mutate(rank = row_number(),
+  tf = n/total) %>%
+  ungroup() -> zipf_data
+
+# plot using Zipf's law
+zipf_data %>%
+  ggplot(aes(rank, tf, color = industry)) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = TRUE) +
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+- Notice that the significant deviation among sub industries in the low ranks is uncommon. In addition, it signifies that MD&A discussion uses a lower percentage of the most common words than many collections of language.
+
+- Inspect the distribution of TF-IDF values.
+
+```{r, warning = FALSE, message = FALSE}
+# calculating TF-IDF scores
+industry_tf_idf <- industry_words %>%
+  bind_tf_idf(word,industry,n) %>%
+  select(-total)
+
+options(scipen = 1000)
+
+# tf-idf frequency
+industry_tf_idf %>% ggplot(aes(tf_idf)) + geom_histogram(bins = 50)
+```
+
+```{r}
+# check the statistical summary
+summary(industry_tf_idf$tf_idf)
+```
+
+- The data is highly right skewed – common words are found with low TF-IDF values.
+-   Visualization
+
+```{r, warning = FALSE, message = FALSE,cache=TRUE}
+# create own function to wrap texts
+swr = function(string, nwrap=20) {
+  paste(strwrap(string, width=nwrap), collapse="\n")
+}
+swr = Vectorize(swr)
+```
+
+```{r, warning = FALSE, message = FALSE}
+industry_tf_idf %>%
+  group_by(industry) %>%
+  slice_max(tf_idf,n=10,with_ties = F) %>%
+  ungroup() %>%
+  mutate(industry = swr(industry), row = row_number(), word2 = fct_reorder(word, tf_idf)) -> n
+
+n %>%
+  ggplot(aes(tf_idf, word2, fill = industry)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~industry, ncol = 3, scales = "free") +
+  labs(x = "tf-idf", y = "Top 10 Words")
+```
+
+-	Overall, from the plot above, the top words with the highest TF-IDF for each sub industry illustrate words that potentially specify sub industries at some degree. 
+  –	For example, Application Software contains subscriber, unlimited, which indicates a business model in the industry. Semiconductors also shows industry-specific words such as dilution, offshore
+
+
+## Bi-grams
+
+### Tokenization
+
+-   Let’s tokenize data using bigrams and remove stop words.
+
+```{r,cache=TRUE}
+token_df_bi <- text_df3 %>% 
+  unnest_tokens(bigram, documents_pos_tagged, token="ngrams",n=2) %>% 
+  separate(bigram, c("word1","word2"), sep = " ") %>% 
+  filter(!word1 %in% stop_words$word) %>% 
+  filter(!word1 %in% mystopwords$word) %>% 
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word2 %in% mystopwords$word) %>% 
+  unite(bigram, word1, word2, sep = " ")
+
+# check the language again and remove non-English words
+token_df_bi$lan <- cld3::detect_language(token_df_bi$bigram)
+token_df_bi <- token_df_bi %>% filter(lan=="en") 
+
+# remove unused features
+token_df_bi %>% select(-text,-lan) -> token_df_bi
+
+# save file
+saveRDS(token_df_bi,file = "token_df_bi.rds")
+```
+
+-   Explore the most common bi-grams (two words) at a corpus level.
+
+```{r}
+# top 20 words
+token_df_bi %>% 
+  count(bigram) %>% 
+  mutate(bigram=reorder(bigram,n)) %>% 
+  slice_max(n,n=20) %>% 
+  ggplot(aes(bigram,n)) + 
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+```
+
+-	Words used in finance and accounting are observed such as discussion analysis, report form, accounting, investment, and commercial. 
+-	We could also observe that these bigrams generate low level of insights. Hence, we need to remove common or frequent words from the corpus.
+
+### TF-IDF
+
+#### Document level
+
+- xxx
+
+```{r,cache=TRUE}
+# calculating TF-IDF scores
+bi_words = token_df_bi %>% count(doc_id, bigram, sort=T)
+
+total_words <- bi_words %>% 
+  group_by(doc_id) %>% 
+  dplyr::summarize(total = sum(n))
+
+# joining data
+bi_words <- bi_words %>% 
+  left_join(total_words)
+```
+
+```{r bindtfidf1,cache=TRUE}
+bi_tf_idf <- bi_words %>% bind_tf_idf(bigram,doc_id,n) %>% select(-total) 
+```
+
+```{r}
+# let's explore the top 10 words with the lowest tf-idf
+bi_tf_idf %>% 
+  group_by(bigram) %>% 
+  arrange(desc(tf_idf)) %>% 
+  top_n(10) 
+```
+
+-	High range of TF-IDF values is observed from 0.24 to 1.11.
+  –	All words are nouns with low level of insights.
+  –	Therefore, we need to remove common and rare words i.e., outliers.
+
+```{r}
+outliers1.2 <- boxplot(bi_tf_idf$tf_idf, ylab = "TF-IDF")$out
+
+# check statistical summary 
+summary(bi_tf_idf$tf_idf)
+
+# drop the rows containing outliers
+bi_tf_idf_2 <- bi_tf_idf %>% filter(tf_idf <= 0.2 & tf_idf >= 0.00002)
+
+
+bi_tf_idf_2 %>% 
+    group_by(bigram) %>% 
+    arrange(desc(tf_idf)) %>% 
+    top_n(10)
+```
+
+-	After removing outliers, bi-grams provide more insights where they generate industry-specific words such as science application, information security, cyber incident.
+
+#### Industry level
+
+- Let’s create a tokenized data frame using the data from the previous part.
+
+```{r,cache=TRUE}
+# joining data tables
+token_df_bi2 = token_df_bi %>% semi_join(bi_tf_idf_2, by = c("doc_id","bigram"))
+
+# save file
+saveRDS(token_df_bi2,file = "token_df_bi2.rds")
+```
+
+```{r,cache=TRUE}
+# create a new column of sub industry
+token_df_bi2 = token_df_bi2 %>%
+  mutate(industry=case_when(
+    cik %in% as.numeric(dp_outsource) ~ "Data Processing & Outsourced Services",
+    cik %in% as.numeric(app_software) ~ "Application Software",
+    cik %in% as.numeric(it_con) ~ "IT Consulting & Other Services",
+    cik %in% as.numeric(semi_con) ~ "Semiconductors",
+    cik %in% as.numeric(tech_hw) ~ "Technology Hardware, Storage & Peripherals"
+  )) %>%
+  mutate(industry=industry %>% as.factor())
+```
+
+- xxx
+
+```{r, warning = FALSE, message = FALSE}
+# word counts
+industry_bi <- token_df_bi2 %>%
+count(industry, bigram, sort = TRUE)
+
+# total word counts
+total_industry_bi <- industry_bi %>%
+group_by(industry) %>%
+summarize(total = sum(n))
+
+# left join
+industry_bi <- industry_bi %>%
+left_join(total_industry_bi)
+```
+
+```{r, warning = FALSE, message = FALSE}
+# TF-IDF calculation
+industry_tf_idf_bi <- industry_bi %>%
+  bind_tf_idf(bigram,industry,n) %>%
+  select(-total)
+```
+
+-   Visualization
+
+```{r, warning = FALSE, message = FALSE}
+options(scipen = 100
+        )
+
+industry_tf_idf_bi %>%
+  group_by(industry) %>%
+  slice_max(tf_idf,n=10,with_ties = F) %>%
+  ungroup() %>%
+  mutate(industry = swr(industry), row = row_number(), word2 = fct_reorder(bigram, tf_idf)) -> n
+
+n %>%
+  ggplot(aes(tf_idf, word2, fill = industry)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~industry, ncol = 3, scales = "free") +
+  labs(x = "tf-idf", y = "Top 10 Words")
+```
+
+-	Bi-grams generate more insights since the top words are more coherent.
+  –	Overall, there are words with distinctive TF-IDF values in App, Semi Con, and DP.
+  –	In the App industry, it is probably that oracle system is the main software that is widely used. We can also see a broader context compared with unigram from subscription to software subscription or ‘forfeiture’ that is added before cancellation.
+  –	For IT Consult, we might assume that the industry does not perform well across years since the top words are growth contraction and contraction percentage. Moreover, the words ‘delivery model’ and ‘global delivery’ potentially signify how the industry works since companies are an agency who needs to deliver expertise to clients.
+  –	For DP, the distinctive words are card network, information security, investment security, which might indicate a concern in the industry.
+  –	For Semi Con, the top words are industry-specific words such as wafer foundry, game console, waiver-related words. There are also words describing the industry such as manufacturing assembly, portion manufacturing.
+  –	Top words in Tech Hardware are potentially about sales and revenue, which are channel mix, conversion cycle, drive industry, price protection, and geography channel.
+
+```{r}
+# remove unused files
+remove(postagged)
+remove(token_df_all)
+remove(token_df_bi)
+remove(token_df2)
+remove(bi_tf_idf)
+remove(bi_words)
+```
+
+---
+
+# Sentiment analysis
+
+This section illustrates how text-derived features, especially polarity, are related to the stock price difference. In addition, [@Mckay] found that quarterly conference call tone is a significant estimator of unusual stock returns. Furthermore, [@Griffin] evidenced that investors respond to EDGAR 10-K filings in a short period (0-2 days) upon the filings are available. However, we would like to see a longer-term effect. Hence, we will use a time windows of 7 days i.e., a week, and inspect whether they have a similar effect or not.
+
+The approach starts with retrieving closing stock price for pre-filing and post-filing dates. In addition, we create a new feature called stock price difference which is defined as a difference between 2 different time windows: a) pre-filing date: 7 days before the filing date, which is the date that 10-K form is submitted on EDGAR, and b) post-filing date, which is the date after 5 days of the filing date. Next, related-text variables are extracted, which are sentiment, polarity, formality, and readability. Lastly, to inspect the relationship and the effect on the price difference, several regression models are implemented using fixed effect, random effect, and linear multiple regression models. The approach is summarized in the figure below.
+
+![Figure 5 Summary of sentiment analysis approach](Figure 5 Summary of sentiment analysis approach.png)
+
+## Related features to text
+
+### Stock price
+
+-	We use tq_get() from ‘Tidy Quantitative Financial Analysis [R package tidyquant version 1.0.3]’ (2021) to retrieve the stock price from Yahoo finance from January 2010 to December 2020, and store the data as a new data frame, sp.
+
+```{r,cache=TRUE, results='hide'}
+# create a new data frame
+sp = data.frame()
+
+for (c in unique(text_df3$comp)){
+  
+  sp_df = tq_get(c, get = "stock.prices", from = "2010-01-01", to = "2020-12-31",complete_cases = TRUE)
+  
+  print(c)
+  
+  sp = bind_rows(sp,sp_df)
+}
+```
+
+-	Next, we explore the data if there are missing values, which will be manually imputed (since it is likely to have a few of them).
+
+```{r,cache=TRUE}
+# read data
+# text_df3 = readRDS("text_df3.rds")
+
+text_df4 = text_df3 %>% 
+  left_join(sp, by = c("comp" = "symbol", "date_before" = "date")) %>% 
+  select(-open,-high,-low,-volume,-adjusted) %>%
+  rename(sp_before = close)
+
+# check missing values
+nacols = which(colSums(is.na(text_df4)) > 0)
+sort(colSums(sapply(text_df4[nacols], is.na)), decreasing = TRUE)
+
+# check observation numbers
+na_rows = subset(text_df4, is.na(text_df4$sp_before)) %>% select(comp_name,comp,filing_date,date_before,date_after_wd,sp_before)
+
+# impute the missing values with the next day data for ‘the pre-filing date’
+text_df4$sp_before[21] <- 35.305 #20-02-2012 -> 21-02-2012
+text_df4$sp_before[42] <- 30.65 #18-02-2019 -> 19-02-2019
+text_df4$sp_before[44] <- 119.97 #20-02-2012 -> 21-02-2012
+text_df4$sp_before[114] <- 16.22 #17-02-2014 -> 18-02-2014
+text_df4$sp_before[152] <- 20.72 #15-02-2010 -> 16-02-2010
+text_df4$sp_before[192] <- 192.46 #15-01-2018 -> 16-01-2018
+```
+
+```{r,cache=TRUE}
+text_df4 = text_df4 %>% 
+  left_join(sp, by = c("comp" = "symbol", "date_after_wd" = "date")) %>%
+  select(-open,-high,-low,-volume,-adjusted) %>% 
+  rename(sp_after = close)
+
+# check missing values
+nacols = which(colSums(is.na(text_df4)) > 0)
+sort(colSums(sapply(text_df4[nacols], is.na)), decreasing = TRUE)
+
+# check observation numbers
+na_rows = subset(text_df4, is.na(text_df4$sp_after)) %>% select(comp_name,comp,filing_date,date_before,date_after_wd,sp_after)
+
+# impute the missing values with the next day data for ‘the post-filing date’
+text_df4$sp_after[90] <- 175.355 #19-02-2018 -> 20-02-2018
+text_df4$sp_after[91] <- 220.59 #19-02-2019 -> 20-02-2019
+text_df4$sp_after[132] <- 317.98 #25-12-2019 -> 26-12-2019
+```
+
+### Sentiment and polarity
+
+-	Let’s calculate sentiment, both positive and negative, including polarity.
+
+```{r analyzesentiment,cache=TRUE,results='hide'}
+all_sentiment <- tibble()
+
+for(i in 1:nrow(text_df4)){
+  
+  df <- analyzeSentiment(cleanse_text(text_df4$text[i]))
+  
+  df$cik = text_df4$cik[i]
+  df$filing_date = text_df4$filing_date[i]
+  
+  all_sentiment <- bind_rows(all_sentiment,
+                             df)
+  print(i)
+}
+```
+
+```{r,cache=TRUE}
+# joining data
+text_df5 = text_df4 %>% left_join(all_sentiment, by = c("cik", "filing_date"))
+```
+
+### Formality
+
+-	[@You] evidenced that investors’ reaction is likely to be stronger for companies with more complex 10-K reports. Hence, this leads to the assumption that formality is related to the difference in stock price.
+
+```{r, eval=FALSE}
+# extract formality
+formality <- qdap::formality(text_df5$text,text_df5$doc_id)
+formality$formality %>% select(doc_id,formality) -> formality_calc
+
+# join data tables
+text_df5 %>% left_join(formality_calc, by = "doc_id") -> text_df6
+
+# back up the data and save into .rds file
+saveRDS(text_df6, file = "text_df6.rds")
+
+# check NA values across columns
+which(colSums(is.na(text_df6)) > 0)
+```
+
+### Readability
+
+-   After calculating the formality, we can also extract the readability.
+
+```{r,cache=TRUE,results='hide'}
+# read data
+text_df6 = readRDS("text_df6.rds")
+
+# create an empty data frame
+readability_all <- data.frame()
+
+# calculate readability score
+for(i in 1:nrow(text_df6)){
+  
+  readability_h <- data.frame() 
+  
+  this_text <- iconv(text_df6$text[i])
+  this_text <- cleanse_text(this_text)
+  
+  tryCatch(readability_h <- flesch_kincaid(this_text),error=function(e){
+    cat("Error parsing")
+  })
+  
+  if(!is.null(readability_h$Readability)){
+    
+    readability_h <- readability_h$Readability
+    readability_h$doc_id <- text_df6$doc_id[i]
+    readability_all <- bind_rows(readability_all,readability_h) 
+  }
+  
+  print(i)
+}
+```
+
+```{r,cache=TRUE}
+# join data tables
+text_df7 <- text_df6 %>% 
+  left_join(readability_all, by = "doc_id") %>% select(-all)
+
+# back up the file
+saveRDS(text_df7, file = "text_df7.rds")
+```
+
+```{r,cache=TRUE}
+# create a new column ‘industry’, ‘year’, and ‘sp_diff’ (price difference)
+text_df7 = text_df7 %>%
+  mutate(industry=case_when(
+    cik %in% as.numeric(dp_outsource) ~ "Data Processing & Outsourced Services",
+    cik %in% as.numeric(app_software) ~ "Application Software",
+    cik %in% as.numeric(it_con) ~ "IT Consulting & Other Services",
+    cik %in% as.numeric(semi_con) ~ "Semiconductors",
+    cik %in% as.numeric(tech_hw) ~ "Technology Hardware, Storage & Peripherals"
+  )) %>%
+  mutate(industry=industry %>% as.factor(), 
+         year = strftime(filing_date, format = "%Y"),
+         sp_diff = sp_after - sp_before)
+```
+
+## Analysis
+
+### Dictionaries
+
+- Which dict should we use?
+  –	Let’s first explore the relationship among them.
+  –	Polarity is used as a proxy of tone in the context since it is a net effect from positive and negative sentiments.
+
+```{r}
+cor(text_df7[, c("SentimentLM", "SentimentHE", "SentimentQDAP", "SentimentGI")])
+```
+
+- GI dictionary is highly related to QDAP and LM dictionaries, respectively.
+-	Let’s compare the polarity among dictionaries across years.
+
+```{r}
+text_df7 %>% pivot_longer(cols = c("SentimentGI","SentimentLM","SentimentQDAP","SentimentHE"), names_to = "dict", values_to = "sentiment") %>%
+  ggplot(aes(x = as.numeric(year), y = sentiment, group=dict, colour = dict)) + 
+  geom_point(show.legend = F) + 
+  geom_smooth() +
+  facet_wrap(~dict, ncol = 1, scales = "free_y")
+```
+
+- GI dictionary presents biased high scores of polarity across times where the average polarity value is 0.1 while others show lower polarity. 
+–	For example, the average polarity from QDAP dictionary is 0.05 across years while for LM dictionary, it illustrates negative polarity.
+- Let’s check the polarity for each industry across periods.
+
+
+```{r}
+text_df7 %>% pivot_longer(cols = c("SentimentGI","SentimentLM","SentimentQDAP","SentimentHE"), names_to = "dict", values_to = "sentiment") %>%
+  ggplot(aes(x = as.numeric(year), y = sentiment, group=dict, colour = dict)) + 
+  geom_point(show.legend = F) +
+  geom_smooth() +
+  facet_wrap(~industry, ncol = 2, scales = "free_y")
+```
+
+-	Overall, GI dictionary provides the highest polarity, followed by QDAP, HE, and LM dictionaries across industries.
+-	For each industry, all dictionaries provide the same polarity pattern across the periods, in general, except for the DP industry where the polarity value from the HE dictionary deviates from the others.
+-	However, Naldi (2019) suggested to use the polarity extracted from using SentimentR package, which uses lexicon developed by Jockers and Rinker. This is because the lexicon provides higher accuracy compared with the dictionaries mentioned above, where they treat negators less efficiently.
+
+```{r,cache=TRUE,results='hide'}
+# create a new data frame retrieving polarity values
+sent_df = tibble()
+
+for (i in 1:nrow(text_df7)){
+  print(i)
+  t = text_df7$text[i] %>% get_sentences() %>% sentimentr::sentiment_by()
+  sent_df = bind_rows(sent_df, t)
+}
+
+sent_df = sent_df %>% mutate(doc_id = paste0("doc",row_number()))
+```
+
+```{r,cache=TRUE}
+# joining data
+text_df8 = text_df7 %>% left_join(sent_df) %>% select(-sd,-element_id)
+```
+
+-	Let’s inspect the correlation across dictionaries.
+
+```{r}
+cor(text_df8[, c("SentimentLM", "SentimentHE", "SentimentQDAP", "SentimentGI", "ave_sentiment")])
+```
+
+-	We see that the polarity score from the new dictionary is moderately related to the result from HE dictionary since they possibly have word overlap.
+-	Let’s see a box plot comparing polarity across industries.
+
+```{r}
+# box plot
+text_df8 %>% ggplot(aes(x = industry, y = ave_sentiment, color = industry)) + labs(x="Industry", y="Polarity") +
+  geom_boxplot() + scale_x_discrete(labels = NULL, breaks = NULL)
+```
+
+-	The plot reveals that the App industry has the highest average polarity, followed by DP, IT Consult, Semi Con, and Tech Hardware, respectively.
+
+### Relationship with polarity
+
+-	Let’s see the relationship between polarity and years.
+
+```{r,warning=FALSE}
+text_df8 %>%
+  filter(!year == "2020") %>%
+  ggplot(aes(x = as.numeric(year), y = ave_sentiment)) + 
+  geom_point(show.legend = F) + 
+  geom_smooth()
+```
+
+-	From the figure above, there is potentially no relationship between them, which requires further inspection.
+-	Let’s use the average polarity instead.
+
+```{r,warning=FALSE}
+text_df8 %>% 
+  group_by(year) %>% 
+  summarize(sent_avg = mean(ave_sentiment)) %>%
+  filter(!year == "2020") %>% ggplot(aes(x=as.numeric(year),y=sent_avg)) + geom_line() + xlab("Year") + ylab("Average Polarity")
+```
+
+- According to the figure above, we see that the polarity scores fluctuate across the periods.
+-	Let’s dig deeper by looking at sub industry level.
+
+```{r}
+text_df8 %>%
+  filter(!year == "2020") %>%
+  ggplot(aes(x = as.numeric(year), y = ave_sentiment, group=industry, colour=industry)) + 
+  geom_point(show.legend = F) + 
+  geom_smooth() +
+  facet_wrap(~industry, ncol = 2, scales = "free_y") + 
+  xlab("Year") + ylab("Average Polarity")
+```
+
+- Overall, DP and Tech Hardware, have higher polarity across periods while the polarity scores of Semi Con industry presents a downward trend; the score of the App industry seems to have an upward trend; and the polarity of IT Consult reveals a steady trend.
+-	Let’s use the average polarity scores.
+
+
+```{r,warning=FALSE}
+# xxx
+text_df8 %>% 
+  group_by(year,industry) %>% 
+  summarize(sent_avg = mean(ave_sentiment)) %>%
+  filter(!year == "2020") %>% ggplot(aes(x=as.numeric(year),y=sent_avg, group=industry, colour = industry)) + geom_line() + xlab("Year") + ylab("Average Polarity")
+```
+
+-	The same patterns are observed regarding the average polarity scores.
+
+### Correlation
+
+-   Let's check correlation of numeric variables.
+
+```{r,warning=FALSE}
+# new data frame
+text_df9 = text_df8 %>% select(-text,-documents_pos_tagged, -WordCount,-word.count,-cik,-NegativityGI,-NegativityHE,-NegativityLM,-NegativityQDAP,-PositivityGI,-PositivityHE,-PositivityLM,-PositivityQDAP,-RatioUncertaintyLM)
+
+# filter only numerical features
+text_df9 %>% select_if(is.numeric) -> df_numeric
+correlate(df_numeric) -> cordata
+
+# explore variables which have higher correlation value than |0.1|
+cordata %>% select(term, sp_diff) %>% filter(sp_diff > 0.1 | sp_diff < -0.1) %>% arrange(desc(sp_diff)) 
+```
+
+-	From the correlation, we could not see features with either a strong or moderate relationship with the stock price difference.
+-	Let’s split the data into 2 data sets - numerical and categorical data sets.
+
+```{r,cache=TRUE}
+# non-numerical data set
+df_etc = text_df9 %>% select_if(negate(is.numeric)) %>% select(-comp_name,-form_type,-access_no,-doc_id,-filing_date,-date_before,-date_after,-date_after_wd) %>% mutate(comp = as.factor(comp), year = year(as.Date(as.character(year), format = "%Y")))
+
+# numerical data set
+df_numeric2 = df_numeric %>% select(-sentence.count,-sp_before,-sp_after)
+```
+
+### Pre-processing data
+
+-   Now, let's do data normalization to use in a regression model
+
+```{r,cache=TRUE}
+preproc2 <- preProcess(df_numeric2, method=c("range"))
+norm2 <- predict(preproc2, df_numeric2)
+```
+
+-   Let's combine the data.
+
+```{r,cache=TRUE}
+df_reg = cbind(norm2, df_etc)
+```
+
+-	We have three main variables extracted from comments - formality, reading grade level, and reading ease level. 
+-	Let’s see the relationships to the stock price difference, starting with the formality.
+
+```{r, warning = FALSE, message = FALSE}
+# explore the distribution
+hist(df_reg$formality)
+hist(df_reg$sp_diff)
+```
+
+-	The average score of formality is approximately 0.3 while the stock price difference is 0.4-0.5.
+
+```{r}
+# relationship 
+df_reg %>% select(formality,sp_diff) %>% na.omit() %>% ggplot(aes(x=formality,y= sp_diff))+geom_smooth(method="loess",se = F)+ geom_point() + labs(x="Formality", y="Price difference", subtitle="Price Difference and Formality Relationship")
+```
+
+-	From the result above, there is no clear relationship.
+-	Now, let’s explore reading grade level.
+```{r, warning = FALSE, message = FALSE}
+hist(df_reg$FK_grd.lvl)
+
+# check the statistical summary of FK_grd.lvl
+df_reg$FK_grd.lvl %>% summary(.)
+
+# plot reading grade level against the price diff
+df_reg %>% select(FK_grd.lvl, sp_diff) %>% na.omit() %>% ggplot(aes(x=FK_grd.lvl,y= sp_diff))+geom_smooth(method="loess",se = F)+geom_point() + labs(x="Reading grade level", y="Price difference", subtitle="Price Difference and Reading Grade Level Relationship")
+```
+
+-	From the graph, no noticable relationship is observed between the price difference and the reading grade level.
+-	Now, let’s explore the reading ease level.
+
+```{r, warning = FALSE, message = FALSE}
+# price diff vs FK reading ease
+df_reg %>% select(FK_read.ease,sp_diff) %>% na.omit() %>% ggplot(aes(x=FK_read.ease,y= sp_diff))+geom_smooth(method="loess",se = F)+geom_point() + labs(x="Reading ease", y="Price difference", subtitle="Price Difference and Reading Ease Relationship")
+```
+
+- 	No noticeable relationship is observed between the two features.
+
+### Relationship with stock price difference
+
+```{r}
+# price diff vs polarity
+df_reg %>% filter(!year == "2020") %>% ggplot(aes(x=ave_sentiment,y=sp_diff)) + geom_point() + stat_smooth() + labs(x="Polarity", y = "Price Difference")
+```
+
+-	It is possible that polarity is not related to the stock price difference.
+
+```{r}
+df_reg %>% filter(!year == "2020") %>% mutate(year = as.numeric(as.character(year))) %>% ggplot(aes(x=year,y=sp_diff)) + geom_point() + stat_smooth() + labs(x="Year", y = "Price Difference") 
+```
+
+-	Price difference is potentially independent across the periods.
+
+```{r}
+df_reg %>% filter(!year == "2020") %>% mutate(year = as.numeric(as.character(year))) %>% ggplot(aes(x=industry,y=sp_diff,color = industry)) + geom_boxplot() + labs(x="Industry", y = "Price Difference") + scale_x_discrete(labels = NULL, breaks = NULL)
+```
+
+-	High variation in price difference is observed for the App and IT Consult industries whereas the average price difference are similar across the industries.
+
+### Regression Analysis
+
+-	Let’s remove the year 2020 since it is the only sample in the time period.
+-	We will create 2 data frames, panel and independent data, and compare their performance.
+  –	This is because time and observations are potentially dependent, which will impact the predictability of the stock price difference.
+
+```{r,cache=TRUE,results='hide'}
+df_reg %>% count(year, sort=T)
+df_reg = df_reg %>% filter(!year == '2020')
+
+# original data converting ‘year’ as factor
+df_reg = df_reg %>% mutate(year = as.factor(year))
+
+# create panel data frame
+df_reg2 = pdata.frame(df_reg, index = c("comp", "year"))
+```
+
+```{r}
+library(mgcv)
+
+# Non-linear model
+model0 <- gam(sp_diff ~ s(ave_sentiment) + industry + year + formality + FK_read.ease, data = df_reg)
+
+# OLS model
+model01 <- lm(sp_diff ~ ave_sentiment + industry + year + formality + FK_read.ease, data = df_reg)
+
+# fixed effect model
+model1 <- plm(sp_diff ~ ave_sentiment + industry + formality + FK_read.ease, data = df_reg2, 
+                    index = c("comp", "year"), 
+                    effect = "twoways", model = "within")
+
+# random effect model
+model2 <- plm(sp_diff ~ ave_sentiment + industry + formality + FK_read.ease, data = df_reg2, 
+                    index = c("comp", "year"), 
+                    effect = "twoways", model = "random")
+
+# pooled model
+model3 <- plm(sp_diff ~ ave_sentiment + industry + formality + FK_read.ease, data = df_reg2, 
+                    index = c("comp", "year"), 
+                    effect = "twoways", model = "pooling")
+```
+
+- Let’s check the model performance using several tests following [Torres-Reyna's approach](Panel Data using R (princeton.edu). 
+
+```{r,cache=TRUE}
+# test fixed-effect vs random effect models
+phtest(model1,model2) # p-value > 0.05, use random effect
+
+# Breusch-Pagan Lagrange multiplier test
+plmtest(model3, type=c("bp")) # p-value >0.05, use OLS
+```
+
+-	From the above tests, they suggested that the time effect is not significant (panel effect) and independent. Therefore, we will use linear multiple regression models to see the effect on the stock price.
+
+```{r,cache=TRUE, results='hide'}
+model4 <- lm(sp_diff ~ ave_sentiment + industry + year + formality, data = df_reg)
+
+model5 <- lm(sp_diff ~ ave_sentiment + industry + year, data = df_reg)
+
+model6 <- lm(sp_diff ~ ave_sentiment + industry, data = df_reg)
+
+stargazer::stargazer(model01,model4,model5,model6,type = "text", single.row = TRUE, # to put coefficients and standard errors on same line
+          no.space = TRUE, # to remove the spaces after each line of coefficients
+          omit.stat=c("f", "ser"),
+          digits = 2,
+          column.sep.width = "0pt",
+          font.size = "tiny", # to make font size smaller
+          out = "modelresult0.html",
+          covariate.labels=c("sentiment","DP","IT Consult","Semi Con","Tech Hardware",
+                             "2011","2012","2013","2014","2015","2016","2017","2018","2019"," formality","readingeaselevel","Intercept"))
+```
+
+![Figure 6 Summary of regression models](Figure 6 Summary of regression models.jpg)
+
+-	For model selection, it is recommended to check the adjusted R squared.
+  –	The metric score, 0.07, is similar for model01, model4, and model5.
+  –	However, we have seen from the previous part that reading ease level and formality have no relation to the difference in stock price. Therefore, model 5 is preferred for simplicity purpose.
+-	From the result, the predictors could explain with 7% predictability of the variation of the stock price difference.
+-	However, there are no predictors containing significant effect to the price difference.
+  –	This indicates that there are other variables, which could better explain the price difference apart from polarity, year, and industry.
+  –	Another possible reason is the sample size is small, especially for each industry. This requires additional exploration.
+  –	Nevertheless, we can observe the sign of the coefficient of the polarity, which shows positive relation to the stock price difference.
+
+---
+
+# Topic Modelling
+
+The section shows how to construct the pipeline for topic modelling. It starts with data preparation and corpus construction. Next, searching for the optimal number of topics are required using semantic coherence and exclusivity as metrics for the selection. After that, the structural topic model (stm) is fitted using the optimal number of topics and hence the analysis is generated, where it presents the associations of topic-document and topic-word. In addition, the marginal effect is estimated to see the relationship between topics and related features (covariates) such as the price difference, polarity, year. Lastly, multiple linear regression models are implemented to see the effect of topics on the stock price difference. The approach summary can be found in the figure below.
+
+![Figure 7 Summary of topic modelling analysis approach](Figure 7 Summary of topic modelling analysis approach.png)
+## Data preparation
+
+-	We use the lemmatized and pos-tagged texts from the section 3.
+
+```{r lematized,cache=TRUE,eval=FALSE}
+postagged = readRDS("postagged.rds")
+
+lematized <- postagged %>% filter(upos %in% c("NOUN",
+                                              "ADJ",
+                                              "ADV"))
+
+saveRDS(lematized, file = "lematized.rds")
+```
+
+```{r}
+# read file
+lematized = readRDS("lematized.rds")
+
+# explore top words across corpus
+lematized %>% group_by(lemma) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(total)) %>% 
+  top_n(30)
+```
+
+
+```{r lematized_2, cache=TRUE}
+# create new data frame
+lematized_2 = lematized %>% count(doc_id, lemma, sort=T)
+
+lematized_2_total <- lematized_2 %>% 
+  group_by(doc_id) %>% 
+  summarize(total = sum(n))
+
+lematized_2 <- lematized_2 %>% 
+  left_join(lematized_2_total)
+
+# save file
+saveRDS(lematized_2, file = "lematized_2.rds")
+```
+
+```{r bindtfidf2, cache=TRUE}
+# TF-IDF calculation
+lem_tf_idf <- lematized_2 %>% bind_tf_idf(lemma,doc_id,n) %>% select(-total) 
+```
+
+-   Next, we will inspect the data with TF-IDF scores.
+
+```{r inspecttfidf2}
+# plot a histogram
+hist(lem_tf_idf$tf_idf,breaks = 50,main="TF-IDF plot", xlim = c(0,1))
+```
+
+-	We can see that the data is highly right skewed where there are high frequent words when tf-idf score is less than 0.4 (low) across listings.
+-	Let’s check the statistical summary and explore the top words.
+
+```{r}
+# statistical summary
+summary(lem_tf_idf$tf_idf) # outliers are observed considering Q1-Q4 with the median equals only 0.00027.
+
+# let's filter the data
+lem_tf_idf_2 <- lem_tf_idf %>% 
+  filter(tf_idf<=0.005 & tf_idf>=0.0001)
+
+hist(lem_tf_idf_2$tf_idf,breaks = 20,main="TF-IDF plot", xlim = c(0,0.005))
+
+# let's explore the top 30 words
+lem_tf_idf_2 %>% 
+  group_by(lemma) %>% 
+  arrange(desc(tf_idf)) %>% 
+  top_n(30)
+```
+
+-	Most of the top words are nouns, which are too generic. Therefore, custom stop words are removed based on the common words shown above.
+
+```{r,cache=TRUE}
+mystopwords <- tibble(word =c("fiscal", "other", "related", "business", "rate", "product", "note", "payment", "table", "contract", "foreign", "currency", "such", "charge", "time", "purchase", "end","research","support", "policy", "available","party", "lease", "requirement", "recognition", "most","significant", "proceed","solutions","excess","issuance","connection","government","day","act","strategy","state","difference","march","country","experience","consulting","action","page","NA", "revenue", "income","tax","cash","cost","net","financial","net","asset","expense","result","total","share","service","company","increase","management","sale"))
+
+allsw = stop_words %>% full_join(mystopwords)
+  
+lemma = lem_tf_idf_2 %>% select(doc_id,lemma) %>% anti_join(allsw, by = c("lemma" = "word"))
+
+# construct a sentence from lemmatized 
+lemma_2 <- lemma %>% group_by(doc_id) %>% summarise(text_tagged = paste(lemma,collapse = " "))
+
+# create a data frame for the coming analysis
+text_df10 <- text_df8 %>% left_join(lemma_2)
+
+# inspect NA values
+na_rows = subset(text_df10, is.na(text_df10$text_tagged)) %>% select(comp_name,comp,filing_date,text_tagged)
+
+# remove unused data
+remove(postagged)
+remove(lematized)
+remove(lematized_2)
+remove(lem_tf_idf)
+remove(lem_tf_idf_2)
+```
+
+## Corpus construction
+
+In this part, we generate 4 new variables since our corpus and the coming analysis will be on industry and year levels. Those are aggregated text column (tp), the average of difference in stock price (sp_avg), the average formality scores (form_avg), and the average polarity (sent_avg).
+
+```{r}
+toprocess = text_df10 %>% 
+  select(industry, year,text_tagged,sp_diff,ave_sentiment,formality) %>%
+  group_by(industry,year) %>%
+  summarize(tp = paste(text_tagged, collapse = " "),
+            sp_avg = mean(sp_diff),
+            form_avg = mean(formality),
+            sent_avg = mean(ave_sentiment)) %>%
+  filter(!year == "2020") %>%
+  mutate(doc_id = paste("doc",row_number()),
+         year = as.numeric(year))
+```
+
+```{r}
+# prepare the corpus used for stm estimation
+processed <- textProcessor(toprocess$tp,
+                           metadata = toprocess,
+                           customstopwords = allsw$word,
+                           stem = F)
+```
+
+-	Let’s explore different threshold of words and documents that we can remove in the corpus.
+
+```{r}
+plotRemoved(processed$documents, lower.thresh=seq(1,200, by=100))
+
+# keep those words that appear more than 1% in the document corpus
+threshold1 <- round(1/100 * length(processed$documents),0)
+
+result1 <- prepDocuments(processed$documents,
+                     processed$vocab,
+                     processed$meta,
+                     lower.thresh = threshold1)
+
+# keep those words that appear more than 5% in the document corpus
+threshold5 <- round(5/100 * length(processed$documents),0)
+
+result5 <- prepDocuments(processed$documents,
+                     processed$vocab,
+                     processed$meta,
+                     lower.thresh = threshold5)
+```
+
+## Number of topics
+
+-	Based on the work from [@Lee], we can set K=0 to initialize the algorithm that yield the possible maximum number of topics.
+
+```{r searchk0, cache=TRUE,eval=FALSE}
+numtopics1 <- stm::searchK(result1$documents,result1$vocab,K=0, prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result1$meta,heldout.seed = 1) #100
+
+numtopics5 <- stm::searchK(result5$documents,result5$vocab,K=0, prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result5$meta,heldout.seed = 1) #67
+```
+
+-	For the numtopics1, the maximum number of topics is 100.
+-	For the numtopics5, the maximum number of topics is 67.
+-	From the above, let’s explore different Ks
+
+```{r searchk1,results='hide'}
+numtopics1 <- stm::searchK(result1$documents,result1$vocab,K=c(10,25,40,55,70,85,100), prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result1$meta,heldout.seed = 1) 
+
+numtopics5 <- stm::searchK(result5$documents,result5$vocab,K=c(10,20,30,40,50,60,70), prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result5$meta,heldout.seed = 1) 
+```
+
+```{r}
+plot(numtopics1) # k = 7-12
+```
+
+-	From the figure above, we can see that the Held-Out likelihood slightly diminishes from 10 topics to 25 topics after which the number rapidly declines. In addition, the semantic coherence shows a downward trend across all possible number of topics. 
+  –	This signifies that the optimal number of topics is potentially less than 10.
+
+```{r}
+plot(numtopics5) # k = 7-12
+```
+
+-	From the plot above, the Held-Out likelihood and semantic coherence present the downward trend.
+  –	This signifies that the optimal number of topics is potentially less than 10.
+-	Let’s search for the optimal number of topics again.
+
+```{r searchk2,results='hide'}
+numtopics1.1 <- stm::searchK(result1$documents,result1$vocab,K=seq(from=5, to=10, by=1), prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result1$meta,heldout.seed = 1)
+
+numtopics5.1 <- stm::searchK(result5$documents,result5$vocab,K=seq(from=5, to=10, by=1), prevalence = ~sp_avg + sent_avg + year + factor(industry), data=result5$meta,heldout.seed = 1)
+```
+
+```{r}
+#par(mar=c(1,1,1,1))
+plot(numtopics1.1) # k = 8
+knitr::kable(numtopics1.1$results)
+```
+
+-	According to the table and plot above, the optimal number of topics is 8 since it presents the 2nd highest score of semantic coherence with lower residuals compared to 7.
+
+```{r}
+plot(numtopics5.1) # k = 5
+knitr::kable(numtopics5.1$results)
+```
+
+-	From the figures above, the optimal number of topics is 5 since it presents the 3rd highest  score of Held-Out likelihood with the highest semantic coherence compared with K= 6,7,8.
+
+## Model estimation
+
+- We run all the topics as dependent variables against the predictors, which are the average difference in price, average polarity, year, and industry
+
+```{r stm,results='hide'}
+# fitting stm model using the number of topics (K) = 8 with threshold = 1%
+suppressWarnings(library(stm))
+finfit1 <- stm::stm(documents = result1$documents,
+               vocab = result1$vocab,
+               K = 8,
+               prevalence = ~sp_avg + sent_avg + year + factor(industry),
+               #max.em.its = 75, 
+               data = result1$meta,
+               reportevery=10,
+               gamma.prior = "L1",
+               sigma.prior = 0.9,
+               init.type = "Spectral",seed = 123)
+```
+
+```{r stm2,results='hide'}
+suppressWarnings(library(stm))
+finfit5 <- stm::stm(documents = result5$documents,
+               vocab = result5$vocab,
+               K = 5,
+               prevalence = ~sp_avg + sent_avg + year + factor(industry),
+               #max.em.its = 100, 
+               data = result5$meta,
+               reportevery=10,
+               gamma.prior = "L1",
+               sigma.prior = 0.9,
+               init.type = "Spectral",seed = 123)
+```
+
+-	Let’s compare the two final model using semantic coherence and exclusivity as the evaluation metrics.
+
+```{r}
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(plotly))
+
+exsem_m1 <- as.data.frame(cbind(c(1:8),exclusivity(finfit1), semanticCoherence(model=finfit1, result1$documents), "Model1"))
+exsem_m5 <- as.data.frame(cbind(c(1:5),exclusivity(finfit5), semanticCoherence(model=finfit5, result5$documents), "Model5"))
+
+exsem_comparison <- rbind(exsem_m1, exsem_m5)
+colnames(exsem_comparison) <- c("K","Exclusivity", "SemanticCoherence", "Model")
+
+exsem_comparison$Exclusivity<-as.numeric(as.character(exsem_comparison$Exclusivity))
+exsem_comparison$SemanticCoherence<-as.numeric(as.character(exsem_comparison$SemanticCoherence))
+
+options(repr.plot.width=7, repr.plot.height=7, repr.plot.res=100)
+
+plotexsem <-ggplot(exsem_comparison, aes(SemanticCoherence, Exclusivity, color = Model))+geom_point(size = 2, alpha = 0.7) + 
+geom_text(aes(label=K), nudge_x=.05, nudge_y=.05)+
+  labs(x = "Semantic coherence",
+       y = "Exclusivity",
+       title = "Exclusivity VS. Semantic Coherence")
+
+plotexsem
+```
+
+- The higher score of semantic coherence, the higher understanding of each topic.
+-	Exclusivity means the uniqueness of related-words for each topic.
+-	This means we should evaluate the model, which lays on the upper right of the graph above. Hence, the final model is model1, which contains 8 topics.
+
+## Analysis
+
+### Topic-Document Association
+
+-	Let’s explore document-topic association using a summary view of data frame.
+
+```{r topicdocument}
+topic1_9 <- make.dt(finfit1, result1$meta)
+View(topic1_9[,-c("tp")])
+```
+
+-	Let’s visualize the proportion of topic for each document.
+
+```{r}
+suppressWarnings(library(tidytext)) # prevent warning error
+theta <- tidytext::tidy(finfit1, matrix = "theta")
+
+theta_df1 <- theta[theta$document%in%c(1:17),] # select the first 17 documents.
+
+thetaplot1 <- ggplot(theta_df1, aes(y=gamma, x=as.factor(topic), fill = as.factor(topic))) +
+  geom_bar(stat="identity",alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~ document, ncol = 3) +
+  labs(title = "Theta values per document",
+       y = expression(theta), x = "Topic")
+
+# plot
+thetaplot1
+```
+
+-	We could see that there are high proportion of topic 8 in the documents 1-10, which represents the App industry while for document 11-20, the dominant topic is 7 with a combination of topic 3.
+
+```{r}
+theta_df2 <- theta[theta$document%in%c(18:34),] # select the next 17 documents.
+
+thetaplot2 <- ggplot(theta_df2, aes(y=gamma, x=as.factor(topic), fill = as.factor(topic))) +
+  geom_bar(stat="identity",alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~ document, ncol = 3) +
+  labs(title = "Theta values per document",
+       y = expression(theta), x = "Topic")
+
+# plot
+thetaplot2
+```
+
+-	For the documents 21-30, which are IT Consult industry, we can see the dominant topic is 5 whereas for the document number 31-40, there are topics with similar proportion, which are topic 1, 4, and 6.
+
+```{r}
+theta_df3 <- theta[theta$document%in%c(35:51),] # select the next 17 documents.
+
+thetaplot3 <- ggplot(theta_df3, aes(y=gamma, x=as.factor(topic), fill = as.factor(topic))) +
+  geom_bar(stat="identity",alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~ document, ncol = 3) +
+  labs(title = "Theta values per document",
+       y = expression(theta), x = "Topic")
+
+# plot
+thetaplot3
+```
+
+-	For documents 41-50, which are Tech Hardware industry, the dominant topics are topic 1 and 2.
+
+### Topic Correlation
+
+-	Topic 1, 2, 4, and 6 are correlated where they are related to Tech Hardware and Semi Con industries. This signifies that these industries are potentially have close topics in the MD&A part.
+-	Topic 3 and 7 are related where they are highly associated with the DP industry.
+-	Topic 5 is mostly related to the IT Consult industry.
+-	Topic 8 is highly relevant to the App industry.
+
+```{r}
+mod.corr <- topicCorr(finfit1)
+plot(mod.corr)
+```
+
+### Topic-Word Association
+
+- Topic coherence vs exclusivity
+
+```{r}
+topicQuality(finfit1,documents=result1$documents)
+```
+
+- Topic Proportion
+
+```{r}
+# topic distribution and top 5 word association
+plot.STM(finfit1, "summary", n=5) 
+```
+
+-	We see that topic 5 has the highest proportion to the corpus, followed by topic 8, 7, 1, and 2.
+
+```{r}
+labelTopics(finfit1, topics=c(5,8,7,1,2), n=10)
+```
+
+-	Let’s plot 10 alternative words for the topics 5, 8, 7, 1, and 2.
+
+```{r}
+plot.STM(finfit1, "labels", topics=c(5,8,7,1,2), label="frex", n=10, width=60)
+```
+
+- Top words per topic
+
+```{r}
+beta <- tidytext::tidy(finfit1) 
+
+options(repr.plot.width=7, repr.plot.height=8, repr.plot.res=100) 
+
+beta %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  mutate(topic = paste0("Topic ", topic),
+         term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = as.factor(topic))) +
+  geom_col(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(x = NULL, y = expression(beta),
+       title = "Highest word probabilities by topic")
+```
+
+-	Generate documents that are highly associated with topics.
+
+```{r finfit1}
+thoughts5 <- findThoughts(finfit1, texts = toprocess$tp,
+n = 2, topics = 5)$docs[[1]]
+
+thoughts8 <- findThoughts(finfit1, texts = toprocess$tp,
+n = 2, topics = 8)$docs[[1]]
+
+thoughts7 <- findThoughts(finfit1, texts = toprocess$tp,
+n = 2, topics = 7)$docs[[1]]
+
+thoughts1 <- findThoughts(finfit1, texts = toprocess$tp,
+n = 2, topics = 1)$docs[[1]]
+
+thoughts2 <- findThoughts(finfit1, texts = toprocess$tp,
+n = 2, topics = 2)$docs[[1]]
+
+plotQuote(thoughts5, width = 100, maxwidth = 600,text.cex=1,main = "Topic5")
+plotQuote(thoughts8, width = 100, maxwidth = 600,text.cex=1,main = "Topic 8")
+plotQuote(thoughts7, width = 100, maxwidth = 600,text.cex=1,main = "Topic 7")
+plotQuote(thoughts1, width = 100, maxwidth = 600,text.cex=1,main = "Topic 1")
+plotQuote(thoughts2, width = 100, maxwidth = 600,text.cex=1,main = "Topic 2")
+```
+
+- Word contrasts between topics
+
+```{r}
+plot.STM(finfit1, type = "perspectives", topics=c(8,7), label="frex", n=10, width=100)
+plot.STM(finfit1, type = "perspectives", topics=c(8,5), label="frex", n=10, width=60)
+plot.STM(finfit1, type = "perspectives", topics=c(7,5), label="frex", n=16, width=60)
+```
+
+–	We see that there are many overlapping among words. The distinctive word for topic 5 is information while for topic 8, it is technical.
+
+-	From the above, we can assign topic labels, which are as follows:
+  –	Topic 1: Consumer and market analysis in Semiconductors
+  - Topic 2: Revenue concern in Tech Hardware
+  –	Topic 3: Operation management in Data Processing
+  –	Topic 4: Operation in Semiconductors
+  –	Topic 5: Information revenue and spending in IT Consulting
+  –	Topic 6: Report discussion and stakeholder concern in Semiconductors
+  –	Topic 7: Growth and competitive analysis in Data Processing
+  –	Topic 8: Competitive skills and winning strategy in Application Software
+
+```{r}
+topic_labels <- c("T1",
+                  "T2",
+                  "T3",
+                  "T4",
+                  "T5",
+                  "T6",
+                  "T7",
+                  "T8")
+```
+
+### Topic and Effect Estimation
+
+- SP diff to topics
+
+```{r}
+effect1 = stm::estimateEffect(~ sp_avg + sent_avg + year + factor(industry), stmobj = finfit1, metadata = result1$meta)
+
+effect1_sum = summary(effect1)
+# effect1_sum$tables
+```
+
+```{r}
+plot(effect1, covariate = "sp_avg",
+     topics = c(1:8),
+     model = finfit1, method = "difference",
+     cov.value1 = "+10", cov.value2 = "-10",
+     xlab = "Low Difference … High Difference",
+     xlim = c(-0.1,0.1),
+     main = "Marginal Effects of Price Difference",
+     #custom.labels =topic_labels,
+     labeltype = "custom")
+```
+
+-	We observe that topic 8: Competitive skills and winning strategy in Application Software, seems to have the highest effect on the price difference followed by topic 2, 1, 6, and 7.
+
+```{r}
+plot(effect1, covariate = "sent_avg",
+     topics = c(1:8),
+     model = finfit1, method = "difference",
+     cov.value1 = "+5", cov.value2 = "-5",
+     xlab = "Low Polarity … High Polarity",
+     xlim = c(-0.3,0.3),
+     main = "Marginal Effects of Polarity",
+     #custom.labels =topic_labels,
+     labeltype = "custom")
+```
+
+-	We observe that topic 7: Growth and competitive analysis in Data Processing , has the highest marginal effect on polarity, followed by topic 8: Competitive skills and winning strategy in Application Software.
+-	Let’s see the relation of topic proportion across years.
+
+```{r}
+for(i in 1:length(topic_labels)){
+plot(effect1, covariate = "year",
+     topics = i,
+     model = finfit1, method = "continuous",
+     # For this plotting we get the uper quantile
+     # and low quantile of the price 
+     xlab = "Year",
+     # xlim = c(0,800),
+     # ylim = c(-0.1,0.1),
+     main = topic_labels[i],
+     printlegend = FALSE,
+     custom.labels =topic_labels[i],
+     labeltype = "custom")
+}
+```
+
+-	From the plots above, it is observed that time has no relation to the topic proportion since the confidence interval at 95% is high.
+
+### Regression Analysis
+
+-	Let’s prepare the data for the regression analysis.
+
+```{r}
+thetadf <- as.data.frame(finfit1$theta)
+colnames(thetadf) <- topic_labels
+
+reginfo <- cbind(result5$meta, thetadf) %>% 
+  filter(!year == "2020") 
+
+reginfo$documents <- NULL
+```
+
+- Model fitting
+
+```{r, cache=TRUE}
+model1.information <- lm(sp_avg~sent_avg+year+factor(industry),data=reginfo)
+
+# adding xxx
+model2.information <- lm(sp_avg~sent_avg+form_avg+year+factor(industry),data=reginfo)
+
+# adding xxx
+model3.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1,data=reginfo)
+
+# adding xxx
+model4.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2,data=reginfo)
+
+# adding xxx
+model5.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3,data=reginfo)
+# adding xxx
+model6.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3+T4,data=reginfo)
+
+# adding xxx
+model7.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3+T4+T5,data=reginfo)
+
+# adding xxx
+model8.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3+T4+T5+T6,data=reginfo)
+
+# adding xxx
+model9.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3+T4+T5+T6+T7,data=reginfo)
+
+# adding xxx
+model10.information <- lm(sp_avg~sent_avg+year+factor(industry)+T1+T2+T3+T4+T5+T6+T7+T8,data=reginfo)
+```
+
+```{r, results='hide'}
+stargazer::stargazer(model1.information,model2.information,model3.information,model4.information,model5.information,model6.information,model7.information, model8.information,model9.information,model10.information,
+          single.row = TRUE, # to put coefficients and standard errors on same line
+          no.space = TRUE, # to remove the spaces after each line of coefficients
+          omit.stat=c("f", "ser"),
+          digits = 2,
+          column.sep.width = "0pt",
+          font.size = "tiny" ,# to make font size smaller
+                     type = "text", out = "modelresult.html",
+          covariate.labels=c("avg. sentiment","avg. formality","year",
+ "DP","IT Consult","Semi Con","Tech Hardware","T1","T2","T3","T4","T5","T6","T7","T8","Intercept"))
+```
+
+-	Considering the adjusted R-squared, the best model that explains variation of the stock price difference is model 7 with the adjusted R-squared, 0.35.
+-	We see that topic 5 has highly significant relation to the average of the stock price difference with the coefficient equals 202.52 (p < 0.05, SE = 93.6).
+-	In addition, we see that IT Consult, DP, and Semi Con coefficients are significant, signifying that they are highly related to the average price difference.
+  –	It presents that Semi Con and DP has higher positive relationship to the average price while IT Consult has lower relationship compared with the App industry given changes of other variables are steady.
+  - Annual period, year, does not significantly affect the average of stock price difference aligned with the previous part.
+
+```{r png, results='hide', include=FALSE, eval=FALSE}
+# back up all plots as .png files
+dir = "C:/Users/Aksara/OneDrive - University of Warwick/IB9CW0 Text Analytics/Assignment/Individual/Image/"
+
+plots.dir.path <- list.files(tempdir(), pattern="rs-graphics", full.names = TRUE); 
+plots.png.paths <- list.files(plots.dir.path, pattern=".png", full.names = TRUE)
+
+file.copy(from=plots.png.paths, to=dir)
+
+plots.png.detials <- file.info(plots.png.paths)
+
+plots.png.detials <- plots.png.detials[order(plots.png.detials$mtime),]
+
+sorted.png.names <- gsub(plots.dir.path, dir, row.names(plots.png.detials), fixed=TRUE)
+
+numbered.png.names <- paste0(dir, 1:length(sorted.png.names), ".png")
+
+
+# rename all the .png files as: 1.png, 2.png, 3.png, and so on.
+file.rename(from=sorted.png.names, to=numbered.png.names)
+
+
+#file.copy(from=plots.png.paths, to=dir)
+```
+
+```{r packagesload}
+# all packages used in this project
+subset(data.frame(sessioninfo::package_info()), attached==TRUE, c(package, loadedversion))
+```
+
+---
+
+# References {-}
+
+<div id="refs"></div>
