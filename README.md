@@ -1,5 +1,5 @@
 # finance10kforms
-Sentiment analysis and topic modelling including data scrapping from EDGAR
+Sentiment analysis and topic modelling including data scrapping from EDGAR.
 If you want to reproduce the result based on the analysis provided, please use rmd instead of a html file.
 
 Note that there is a bug when knitting r markdown into .html, specifically for stm(), which is STM model estimation.
